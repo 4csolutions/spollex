@@ -12,15 +12,17 @@ class CustomSalesPerson(SalesPerson):
         total_incentive = 0
         remaining_amount = allocated_amount
         slabs = self.get("custom_incentive_slabs")
+        slab_crossed = 0
 
         for slab in slabs:
             slab_start = slab.from_amount
             slab_end = slab.to_amount
 
-            if slab_end == 0 and allocated_amount_against_invoice > slab_start:
+            if not slab_end and (allocated_amount_against_invoice + 1) >= slab_start:
                 total_incentive += slab.incentive_percent * remaining_amount * 0.01
+                break
 
-            if slab_start <= allocated_amount_against_invoice < slab_end:
+            if slab_start <= (allocated_amount_against_invoice + 1) if slab_crossed else allocated_amount_against_invoice < slab_end:
                 amount_in_this_slab = min(slab_end - allocated_amount_against_invoice, remaining_amount)
                 total_incentive +=  slab.incentive_percent * amount_in_this_slab * 0.01
                 remaining_amount -= amount_in_this_slab
@@ -28,10 +30,10 @@ class CustomSalesPerson(SalesPerson):
 
             if remaining_amount == 0:
                 break
-            elif remaining_amount > 0 and allocated_amount_against_invoice >= slab_end:
-                if allocated_amount_against_invoice == slab_end:
-                    allocated_amount_against_invoice = slab_end + 1
-                continue
+            elif allocated_amount_against_invoice == slab_end:
+                slab_crossed = 1
+            else:
+                slab_crossed = 0
 
         return total_incentive
     
@@ -58,5 +60,6 @@ def fetch_commission_rate(sales_person_name, allocated_amount, posting_date):
     incentives = sales_person.get_incentive_amount(allocated_amount_against_invoice, allocated_amount)
 
     commission_rate = (incentives * 100)/allocated_amount
+    commission_rate_formated = format(commission_rate, ".2f")
 
-    return commission_rate
+    return commission_rate_formated
