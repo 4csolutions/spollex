@@ -180,6 +180,14 @@ doc_events = {
 	"Maintenance Visit": {
 		"on_submit": "spollex.doctype_events.maintenance_visit.update_contract_visits",
         "on_cancel": "spollex.doctype_events.maintenance_visit.update_contract_visits"
+	},
+	"Sales Invoice": {
+		"on_submit": "spollex.doctype_events.sales_invoice.update_renewal_invoice_status",
+		"on_cancel": "spollex.doctype_events.sales_invoice.update_renewal_invoice_status"
+	},
+	"Quotation": {
+		"on_update": "spollex.doctype_events.quotation.update_renewal_lost_status",
+		"on_update_after_submit": "spollex.doctype_events.quotation.update_renewal_lost_status"
 	}
 }
 

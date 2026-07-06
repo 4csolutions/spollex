@@ -13,11 +13,57 @@ frappe.ui.form.on("Sales Invoice", {
     //         calculate_commission_rate(frm, record.doctype, record.name);
     //     });
     // },
+    onload: function(frm) {
+        frm.set_query("item_code", "custom_subscription_items", function(doc, cdt, cdn) {
+            let items = (doc.items || []).map(item => item.item_code);
+            return {
+                filters: [
+                    ["Item", "name", "in", items]
+                ]
+            };
+        });
+    },
     refresh: function(frm) {
         if (frm.doc.docstatus === 1 && frm.doc.status != "Paid") {
             frm.add_custom_button(__("Post Sales Credit Note"), function() {
                 post_sales_credit_note(frm);
             });
+        }
+    },
+    before_save: function(frm) {
+        // Ensure subscription item amounts are populated from the main items table before saving
+        let subscription_items = frm.doc.custom_subscription_items || [];
+        let invoice_items = frm.doc.items || [];
+
+        let item_amount_map = {};
+        invoice_items.forEach(item => {
+            if (item.item_code) {
+                // If there are duplicate items, we sum their amounts
+                item_amount_map[item.item_code] = (item_amount_map[item.item_code] || 0) + (item.amount || 0);
+            }
+        });
+
+        subscription_items.forEach(row => {
+            if (row.item_code && item_amount_map[row.item_code] !== undefined) {
+                frappe.model.set_value(row.doctype, row.name, "amount", item_amount_map[row.item_code]);
+            }
+        });
+    }
+});
+
+frappe.ui.form.on("Sales Invoice Subscription Item", {
+    item_code: function(frm, cdt, cdn) {
+        let row = locals[cdt][cdn];
+        if (row.item_code) {
+            // Use setTimeout to allow standard Link field callbacks to finish first
+            setTimeout(() => {
+                let matched_item = (frm.doc.items || []).find(item => item.item_code === row.item_code);
+                if (matched_item) {
+                    frappe.model.set_value(cdt, cdn, "amount", matched_item.amount);
+                } else {
+                    frappe.msgprint(__("Item {0} is not present in the Sales Invoice items table.", [row.item_code]));
+                }
+            }, 100);
         }
     }
 });
