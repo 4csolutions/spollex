@@ -1,117 +1,46 @@
 # Copyright (c) 2024, 4C Solutions and contributors
 # For license information, please see license.txt
 
-import frappe
-from frappe import _, msgprint
+from frappe import _
+from frappe.utils import flt
+from erpnext.selling.report.sales_partner_commission_summary.sales_partner_commission_summary import (
+	SalesPartnerCommissionSummaryReport,
+)
+
 
 def execute(filters=None):
 	if not filters:
 		filters = {}
 
-	columns = get_columns(filters)
-	data = get_entries(filters)
+	return SpollexSalesPartnerCommissionOverviewReport(filters).run()
 
-	return columns, data
 
-def get_columns(filters):
-	if not filters.get("doctype"):
-		msgprint(_("Please select the document type first"), raise_exception=1)
+class SpollexSalesPartnerCommissionOverviewReport(SalesPartnerCommissionSummaryReport):
+	def prepare_columns(self):
+		super().prepare_columns()
 
-	columns = [
-		{
-			"label": _(filters["doctype"]),
-			"options": filters["doctype"],
-			"fieldname": "name",
-			"fieldtype": "Link",
-			"width": 140,
-		},
-		{
-			"label": _("Customer"),
-			"options": "Customer",
-			"fieldname": "customer",
-			"fieldtype": "Link",
-			"width": 140,
-		},
-		{
-			"label": _("Territory"),
-			"options": "Territory",
-			"fieldname": "territory",
-			"fieldtype": "Link",
-			"width": 100,
-		},
-		{"label": _("Posting Date"), "fieldname": "posting_date", "fieldtype": "Date", "width": 100},
-		{"label": _("Amount"), "fieldname": "amount", "fieldtype": "Currency", "width": 120},
-		{
-			"label": _("Sales Partner"),
-			"options": "Sales Partner",
-			"fieldname": "sales_partner",
-			"fieldtype": "Link",
-			"width": 140,
-		},
-		{
-			"label": _("Commission Rate %"),
-			"fieldname": "commission_rate",
-			"fieldtype": "Data",
-			"width": 100,
-		},
-		{
-			"label": _("Total Commission"),
-			"fieldname": "total_commission",
-			"fieldtype": "Currency",
-			"width": 120,
-		},
-		{
-			"label": _("Tax Deduction(9%)"),
-			"fieldname": "tax_deduction",
-			"fieldtype": "Currency",
-			"width": 120,
-		},
-		{
-			"label": _("Commission Payable"),
-			"fieldname": "commission_payable",
-			"fieldtype": "Currency",
-			"width": 120,
-		},
-	]
+		# Add custom tax deduction and commission payable columns
+		self.make_column(
+			label=_("Tax Deduction(9%)"),
+			fieldname="tax_deduction",
+			fieldtype="Currency",
+			width=120,
+		)
+		self.make_column(
+			label=_("Commission Payable"),
+			fieldname="commission_payable",
+			fieldtype="Currency",
+			width=120,
+		)
 
-	return columns
+	def get_data(self):
+		super().get_data()
 
-def get_entries(filters):
-	date_field = "transaction_date" if filters.get("doctype") == "Sales Order" else "posting_date"
+		# Compute tax deduction and commission payable for each row
+		for row in self.data:
+			total_commission = flt(row.get("total_commission", 0.0))
+			tax_deduction = flt(total_commission * 0.09)
+			commission_payable = flt(total_commission - tax_deduction)
 
-	conditions = get_conditions(filters, date_field)
-	entries = frappe.db.sql(
-		"""
-		SELECT
-			name, customer, territory, {} as posting_date, base_net_total as amount,
-			sales_partner, commission_rate, total_commission, total_commission * 0.09 as tax_deduction,
-			total_commission - total_commission * 0.09 as commission_payable
-		FROM
-			`tab{}`
-		WHERE
-			{} and docstatus = 1 and sales_partner is not null
-			and sales_partner != '' order by name desc, sales_partner
-		""".format(date_field, filters.get("doctype"), conditions),
-		filters,
-		as_dict=1,
-	)
-
-	return entries
-
-def get_conditions(filters, date_field):
-	conditions = "1=1"
-
-	for field in ["company", "customer", "territory"]:
-		if filters.get(field):
-			conditions += f" and {field} = %({field})s"
-
-	if filters.get("sales_partner"):
-		conditions += " and sales_partner = %(sales_partner)s"
-
-	if filters.get("from_date"):
-		conditions += f" and {date_field} >= %(from_date)s"
-
-	if filters.get("to_date"):
-		conditions += f" and {date_field} <= %(to_date)s"
-
-	return conditions
+			row["tax_deduction"] = tax_deduction
+			row["commission_payable"] = commission_payable

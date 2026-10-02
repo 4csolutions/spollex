@@ -1,11 +1,11 @@
 # Copyright (c) 2025, 4C Solutions and contributors
 # For license information, please see license.txt
 
+from collections import defaultdict
 import frappe
 from frappe import _
 from frappe.utils import flt
 from frappe.utils.nestedset import get_descendants_of
-from collections import defaultdict
 
 from erpnext.accounts.report.financial_statements import (
 	compute_growth_view_data,
@@ -14,6 +14,9 @@ from erpnext.accounts.report.financial_statements import (
 	get_data,
 	get_filtered_list_for_consolidated_report,
 	get_period_list,
+)
+from erpnext.accounts.report.profit_and_loss_statement.profit_and_loss_statement import (
+	get_net_profit_loss as erpnext_get_net_profit_loss,
 )
 
 
@@ -64,7 +67,7 @@ def execute(filters=None):
 
 	direct_income, indirect_income, direct_expense, indirect_expense = [], [], [], []
 
-	for row in income:
+	for row in income or []:
 		account = row.get("account")
 		if not account:
 			continue
@@ -73,7 +76,7 @@ def execute(filters=None):
 		elif account in indirect_income_accounts or account == indirect_income_root:
 			indirect_income.append(row)
 
-	for row in expense:
+	for row in expense or []:
 		account = row.get("account")
 		if not account:
 			continue
@@ -134,12 +137,11 @@ def execute(filters=None):
 		compute_margin_view_data(data, period_list, filters.accumulated_values)
 
 	if filters.periodicity == "Yearly":
-		# Add a separate "Total" column
 		columns.append({
 			"label": _("Total"),
 			"fieldname": "total",
 			"fieldtype": "Currency",
-			"width": 150
+			"width": 150,
 		})
 
 		for row in data:
@@ -147,20 +149,21 @@ def execute(filters=None):
 				continue
 
 			total_value = 0.0
-
-			# Sum across all period columns
 			for period in period_list:
 				key = period.key
 				if key in row:
 					total_value += flt(row[key])
-			if (row.get("is_group") and row.get("indent", 0) == 0) or row.get("account_name") in ("'Total Income (Credit)'", "'Total Expense (Debit)'",
- "'Gross Profit'", "'Net Profit'"):
-				# clear yearly column values
+
+			if (row.get("is_group") and row.get("indent", 0) == 0) or row.get("account_name") in (
+				"'Total Income (Credit)'",
+				"'Total Expense (Debit)'",
+				"'Gross Profit'",
+				"'Net Profit'",
+			):
 				for period in period_list:
 					key = period.key
 					if key in row:
 						row[key] = None
-				# set total only for group accounts
 				row["total"] = total_value
 			else:
 				row["total"] = None
@@ -174,7 +177,6 @@ def get_report_summary(
 ):
 	net_income, net_direct_expense, gross_profit, net_indirect_expense, net_profit = 0.0, 0.0, 0.0, 0.0, 0.0
 
-	# Apply consolidated filtering
 	if filters.get("accumulated_in_group_company"):
 		period_list = get_filtered_list_for_consolidated_report(filters, period_list)
 
@@ -257,7 +259,7 @@ def get_gross_profit_loss(income, direct_expense, period_list, company, currency
 		key = period if consolidated else period.key
 		total_income = flt(income[-2][key], 3) if income else 0
 		total_direct_expense = flt(direct_expense[0][key], 3) if direct_expense else 0
-		
+
 		gross_profit_loss[key] = total_income - total_direct_expense
 
 		if gross_profit_loss[key]:
@@ -276,7 +278,7 @@ def get_net_profit_loss(income, expense, period_list, company, currency=None, co
 		"account_name": "'" + _("Net Profit") + "'",
 		"account": "'" + _("Net Profit") + "'",
 		"warn_if_negative": True,
-		"currency": currency or frappe.get_cached_value("Company", company, "default_currency")
+		"currency": currency or frappe.get_cached_value("Company", company, "default_currency"),
 	}
 
 	has_value = False
@@ -299,12 +301,14 @@ def get_net_profit_loss(income, expense, period_list, company, currency=None, co
 
 
 def get_chart_data(filters, columns, income, direct_expense, gross_profit_loss, indirect_expense, net_profit_loss, currency):
-	labels = [d.get("label") for d in columns[2:]]
+	labels = [d.get("label") for d in columns[2:] if d.get("fieldname") != "total"]
 
 	income_data, direct_data, gross_data, indirect_data, net_data = [], [], [], [], []
 
 	for col in columns[2:]:
 		fieldname = col.get("fieldname")
+		if fieldname == "total":
+			continue
 		if income:
 			income_data.append(income[-2].get(fieldname, 0.0))
 		if direct_expense:
@@ -331,21 +335,18 @@ def get_chart_data(filters, columns, income, direct_expense, gross_profit_loss, 
 	chart = {
 		"data": {
 			"labels": labels,
-			"datasets": datasets
+			"datasets": datasets,
 		},
 		"type": "line" if filters.accumulated_values else "bar",
 		"fieldtype": "Currency",
 		"options": "currency",
-		"currency": currency
+		"currency": currency,
 	}
 
 	return chart
 
 
 def reset_indent_tree(income_expense_rows, root_account_name, company_abbr):
-	from collections import defaultdict
-
-	# Build account lookup and parent-child map
 	account_map = {}
 	child_map = defaultdict(list)
 
@@ -358,7 +359,7 @@ def reset_indent_tree(income_expense_rows, root_account_name, company_abbr):
 			child_map[parent].append(account)
 
 	ordered_rows = []
-	# Recursive function to set indent
+
 	def set_indent(account, indent_level):
 		row = account_map.get(account)
 		if row:
@@ -366,16 +367,11 @@ def reset_indent_tree(income_expense_rows, root_account_name, company_abbr):
 			ordered_rows.append(row)
 
 			children = child_map.get(account, [])
-
 			if account == f"Direct Income - {company_abbr}":
-
 				children = sorted(children, key=lambda x: (x != f"Sales - {company_abbr}", x.lower()))
 
 			for child in children:
 				set_indent(child, indent_level + 1)
 
 	set_indent(root_account_name, 0)
-
 	income_expense_rows[:] = ordered_rows
-
-
