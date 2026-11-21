@@ -174,6 +174,11 @@ class SpollexReceivablePayableReport(ERPNextReceivablePayableReport):
 					row.days_until_pdc = max((getdate(future.future_date) - getdate(nowdate())).days, 0)
 					break
 
+	def append_row(self, row):
+		super().append_row(row)
+		if row.get("due_date") and getdate(row.due_date) < getdate(nowdate()):
+			row["overdue"] = 1
+
 	def build_data(self):
 		# Spollex only considers Sales Invoices and Purchase Invoices
 		for _key, row in list(self.voucher_balance.items()):
